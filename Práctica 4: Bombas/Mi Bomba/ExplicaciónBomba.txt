@@ -1,0 +1,328 @@
+//////////////////////////////////////////////////////////////////////////////////////////
+//	Cómo desactivar la bomba de "bomba.c"
+// Contraseña: holamundo
+//	Código: 6993
+//	Tiempo: 10s
+//	Compilación: gcc -m32 -o bomba bomba.c
+//////////////////////////////////////////////////////////////////////////////////////////
+
+-En primer lugar debemos de identificar dónde nos estalla la bomba, para ello
+realizamos una depuración rápida del programa colocando un breakpoint en las dos
+primeras instrucciones y avanzando con nexti. Observamos que nos estalla por 
+primera vez en el punto:
+
+	*--------------------------------------------------------*
+	0x08048868 <main+103>:       call   0x80486e1 <explosion>
+	*--------------------------------------------------------*
+
+-Observamos las instrucciones anteriores:
+
+	*-------------------------------------------------------*
+   0x08048864 <main+99>:        test   %eax,%eax
+   0x08048866 <main+101>:       je     0x804886d <main+108>
+   0x08048868 <main+103>:       call   0x80486e1 <explosion>
+	*-------------------------------------------------------*
+
+-Como vemos se realiza un JE "jump if equal" y un test de %eax con %eax, por tanto esto 
+significa que está comparando algo y que si es igual se salta la llamada a la bomba.
+
+
+//////////////////////////////////////////////////////////////////////////////////////////
+// Obtener la contraseña:
+//////////////////////////////////////////////////////////////////////////////////////////
+
+
+-Una vez que ya sabemos esto vamos a intentar averiguar qué se está comparando, 
+realizando una depuración más completa: 
+
+Vemos en primer lugar una llamada a gettimeofday, sin embargo ahora no parece tener mucha
+relevancia:
+
+	*---------------------------------------------------------------*
+	0x08048826 <main+37>:        call   0x8048480 <gettimeofday@plt>
+	*---------------------------------------------------------------*	
+
+Cuando llegamos al punto:
+	
+	*--------------------------------------------------------*
+   0x08048846 <main+69>:        push   %eax
+   0x08048847 <main+70>:        push   $0x1e
+   0x08048849 <main+72>:        lea    -0x2a(%ebp),%eax
+   0x0804884c <main+75>:        push   %eax
+   0x0804884d <main+76>:        call   0x8048470 <fgets@plt>
+	*--------------------------------------------------------*
+
+Se corresponde con la introdución de la contraseña. La función fgets recibe como argumentos
+un string, un tamaño y el parámetro stdin. Para ver dónde está almacenando el string realizamos
+un volcado de memoria sobre tres direcciones de la pila:
+	
+	*--------------------------------*
+	Data -> Memory
+	Examine 3 hex words (4) from $esp
+	*--------------------------------*
+
+Obtenemos:
+	
+	*---------------------------------------------*
+	0xffffcf90:	0xffffcfbe	0x0000001e	0xf7fb95a0
+	*---------------------------------------------*
+
+Por tanto la respuesta se está almacenando en 0xffffcfbe, podemos comprobarlo con el volcado de
+memoria:
+	
+	*-------------------------------------*
+	Data -> Memory
+	Examine 1 string bytes from 0xffffcfbe
+	*-------------------------------------*
+	
+Continuámos con la ejecución del programa y nos damos cuenta de que antes de llegar a la explosión,
+llama a una función llamada cifrar, que recibe un argumento: 
+	
+	*-----------------------------------------------------*
+	0x0804885b <main+90>:        push   %eax
+   0x0804885c <main+91>:        call   0x804860b <cifrar>
+	*-----------------------------------------------------*
+
+Veamos que argumentos está recibiendo con el volcado de la pila:
+	
+	*--------------------------------*
+	Data -> Memory
+	Examine 1 hex words (4) from $esp
+	*--------------------------------*
+	0xffffcf90:	0xffffcfbe
+	*--------------------------------*
+
+Nos damos cuenta de que está recibiendo la cadena leída del fgets, parece una función 
+importante, veamos que es lo que realiza viendo su código con stepi.
+
+En primer lugar la función llama a strlen que recibe como argumento un string y devuelve su 
+longitud. Si utilizamos el volcado de memoria sobre la pila, (tal y como se ha hecho en el
+paso anterior), vemos que está recibiendo la cadena que nosotros hemos introducido. Por tanto
+deducimos que se está obteniendo el tamaño de la contraseña introducida.
+	
+	*------------------------------------------------*
+	0x0804862a <+31>:    pushl  -0x2c(%ebp)
+   0x0804862d <+34>:    call   0x80484c0 <strlen@plt>
+	*------------------------------------------------*
+
+Contínuamos y vemos algo que se asemeja a un bucle for:
+
+	*-------------------------------------------------------------------*
+   0x08048666 <+91>:    movl   $0x0,-0x1c(%ebp)
+	_________________________________________________________Init
+   0x0804866d <+98>:    jmp    0x804868d <cifrar+130>	
+	_________________________________________________________Go to done
+	0x0804866f <+100>:   mov    -0x1c(%ebp),%edx 				
+   0x08048672 <+103>:   mov    -0x2c(%ebp),%eax					
+   0x08048675 <+106>:   add    %edx,%eax
+   0x08048677 <+108>:   movzbl (%eax),%eax
+   0x0804867a <+111>:   add    $0x3,%eax
+   0x0804867d <+114>:   mov    %eax,%ecx
+   0x0804867f <+116>:   mov    -0x10(%ebp),%edx
+   0x08048682 <+119>:   mov    -0x1c(%ebp),%eax
+   0x08048685 <+122>:   add    %edx,%eax
+   0x08048687 <+124>:   mov    %cl,(%eax)
+	_________________________________________________________Body
+   0x08048689 <+126>:   addl   $0x1,-0x1c(%ebp)
+	_________________________________________________________Update   
+	0x0804868d <+130>:   mov    -0x1c(%ebp),%eax
+   0x08048690 <+133>:   cmp    -0x18(%ebp),%eax
+	_________________________________________________________Test
+   0x08048693 <+136>:   jl     0x804866f <cifrar+100>
+	_________________________________________________________Go to Loop
+	*--------------------------------------------------------------------*
+
+Teniendo en cuenta que es un bucle for y que antes se ha obtenido la longitud de la cadena
+introducida, podemos deducir que es un bucle que itera sobre la cadena, pero ¿que hace con 
+ella? Para saberlo debemos de analizar un poco el cuerpo:
+
+	*-------------------------------------------------------------------------------------------*
+	0x0804866f <+100>:   mov    -0x1c(%ebp),%edx 	// índice a edx.				
+   0x08048672 <+103>:   mov    -0x2c(%ebp),%eax		// vector a eax (Mirar Nota)		
+   0x08048675 <+106>:   add    %edx,%eax				// Obtener la indexación en el vector.
+   0x08048677 <+108>:   movzbl (%eax),%eax			// extender de 8 a 32 bits
+   0x0804867a <+111>:   add    $0x3,%eax				// Sumarle 3 a eax
+   0x0804867d <+114>:   mov    %eax,%ecx				// De aquí hasta abajo almacena el resultado
+   0x0804867f <+116>:   mov    -0x10(%ebp),%edx			en otro vector.
+   0x08048682 <+119>:   mov    -0x1c(%ebp),%eax
+   0x08048685 <+122>:   add    %edx,%eax
+   0x08048687 <+124>:   mov    %cl,(%eax)
+	*--------------------------------------------------------------------------------------------*
+
+NOTA: Sabemos que contiene el vector por este código al inicio de la función:
+	
+	*-------------------------------------------*
+	0x08048612 <+7>:     mov    0x8(%ebp),%eax    // Argumento de la función.
+   0x08048615 <+10>:    mov    %eax,-0x2c(%ebp)
+	*-------------------------------------------*
+
+En definitiva podemos ver que el bucle le suma 3 a cada caracter que contiene. Si comprobamos
+el contenido de %eax en <movzbl (%eax),%eax> vemos que en cada iteración contiene un caracter
+de la cadena introducida.
+
+	*-----------------------------*
+	Data -> Memory
+	Examine 1 char bytes from $eax
+	*-----------------------------*
+
+Si continuamos con la ejecución podemos ver que se llama a strlen y posteriormente a strncmp:
+
+	*---------------------------------------------------*
+	0x0804869d <+146>:   call   0x80484c0 <strlen@plt>
+	*---------------------------------------------------*
+	0x080486b4 <+169>:   call   0x80484f0 <strncmp@plt>
+	*---------------------------------------------------*
+
+Veamos que está haciendo strlen en este caso:
+
+	*--------------------------------*
+	Data -> Memory
+	Examine 1 hex words (4) from $esp
+	*--------------------------------*
+	0xffffcf30:	0x0804a03c
+	*--------------------------------*
+
+y a continuación el string que contiene:
+
+	*-------------------------------------*
+	Data -> Memory
+	Examine 1 string bytes from 0x0804a03c
+	*-------------------------------------*
+	0x804a03c <contrasenia>:	"krodpxqgr"
+	*-------------------------------------*
+
+Parece que hemos encontrado la contraseña, por tanto podemos deducir que strlen es el tercer
+parámetro de strncmp. Pero claro, esta es la contraseña con la que está comparando, teniendo
+en cuenta que previamente se le han sumado 3 a cada uno de nuestros caracteres de la contraseña
+introducida, lo que tenemos que introducir para obtener esta contraseña es quitarle 3 a 
+"krodpxqgr", obtiendo la cadena "holamundo". A continuación de strncmp se encuentra el ret, por
+tanto deducimos que este es el utilizado para hacer la comparación en el test que se salta la 
+explposión de la bomba. 
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+// Obtener contraseña numérica
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+-Una vez que ya sabemos esto, podemos continuar con la ejecución. La segunda vez que nos explota
+la bomba es al introducir la clave numérica en:
+
+	*--------------------------------------------------------*
+	0x080488a7 <main+166>:       cmp    %eax,%edx
+   0x080488a9 <main+168>:       je     0x80488b0 <main+175>
+   0x080488ab <main+170>:       call   0x80486e1 <explosion>
+	*--------------------------------------------------------*
+
+-Nuevamente tenemos el mismo caso de antes, se están comparando dos cosas (está vez con cmp)
+y si son iguales se salta la llamada a explosion con je, realizamos el mismo análisis:
+
+Tenemos un scanf (recibe dos parámetros: el formato y la variable a leer) que almacena nuestra 
+clave, para ver donde la almacena, volcamos la pila como antes y nos quedamos con la dirección 
+del segundo parámetro:
+	
+	*--------------------------------*
+	Data -> Memory
+	Examine 2 hex words (4) from $esp
+	*--------------------------------*
+	0xffffcf90:	0x08048b15	0xffffcfa8
+	*--------------------------------*
+
+Lo almacena en 0xffffcfa8, lo comprobamos con el volcado de memoria:
+
+	*--------------------------------------------*
+	Data -> Memory
+	Examine 1 unsigned words (4) from 0xffffcfa8
+	*--------------------------------------------*
+
+Continuando con la ejecución observamos que antes de explosión se llama a una función
+llamada descodifica con un solo parámetro:
+
+	*----------------------------------------------------------*
+	0x08048897 <main+150>:       push   %eax
+   0x08048898 <main+151>:       call   0x80486d4 <descodifica>
+	*----------------------------------------------------------*
+
+Comprobando nuevamente con el volcado de la pila los parámetros que recibe, nos damos 
+cuenta de que coge el dato que ha leído scanf, así que vemos su contenido con stepi:
+
+	*------------------------------------------*
+	0x080486d4 <+0>:     push   %ebp
+   0x080486d5 <+1>:     mov    %esp,%ebp
+   0x080486d7 <+3>:     mov    0x8(%ebp),%eax
+   0x080486da <+6>:     add    $0x3f0,%eax
+   0x080486df <+11>:    pop    %ebp
+   0x080486e0 <+12>:    ret  
+	*-------------------------------------------*
+
+Lo que está realizando es mover a %eax el primer argumento (mov    0x8(%ebp),%eax) (que se
+trata del dato leído por scanf, y a continuación le suma $0x3f0 (1008 en decimal) dejando
+el resultado en %eax que es el registro de retorno. Por tanto está función cambia nuestro
+valor introducido sumandole 1008 y devuelve el resultado.
+
+-Volvamos al código anterior a "explosion" justo después del retorno de la función "codifica":
+
+	*--------------------------------------------------------*
+	0x0804889d <main+156>:       add    $0x10,%esp
+   0x080488a0 <main+159>:       mov    %eax,%edx
+   0x080488a2 <main+161>:       mov    0x804a048,%eax
+   0x080488a7 <main+166>:       cmp    %eax,%edx
+   0x080488a9 <main+168>:       je     0x80488b0 <main+175>
+   0x080488ab <main+170>:       call   0x80486e1 <explosion>
+	*--------------------------------------------------------*
+
+Vemos que copia el valor de %eax (que contenía la modificación sobre nuestro valor introducido)
+en %edx, a continuación mueve a %eax un nuevo valor situado en 0x804a048 y a continuación realiza
+la comparación. Por tanto podemos deducir que en 0x804a048 se encuentra la contraseña numérica.
+Volcamos la memoria para verlo:
+	
+	*--------------------------------------------*
+	Data -> Memory
+	Examine 1 unsigned words (4) from 0x804a048
+	*--------------------------------------------*
+	0x804a048 <codigo>:	8001
+	*--------------------------------------------*
+
+Por tanto la contraseña numérica es 8001, pero ¡ojo!, primero se le suma 1008 a nuestro valor, 
+en consecuencia, para que coincidan tendremos que introducir 8001 - 1008 = 6993.
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+// Obtener tiempo límite
+/////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+-La última vez que nos puede explotar la bomba es en:
+	
+	*--------------------------------------------------------*
+	0x080488cb <main+202>:       cmp    $0xa,%eax
+   0x080488ce <main+205>:       jle    0x80488d5 <main+212>
+   0x080488d0 <main+207>:       call   0x80486e1 <explosion>
+	*--------------------------------------------------------*
+
+Nuevamente se compara algo, pero en este caso se utiliza jle (jump if less or equal) por tanto
+ahora saltaremos la bomba si un valor es menor o igual que otro, según lo que nos dice cmp, lo 
+que hay en %eax tiene que ser menor que 0xa (10 en decimal), ¿qué contiene %eax? :
+
+	*---------------------------------------------------------------*
+	0x080488b9 <main+184>:       call   0x8048480 <gettimeofday@plt>
+   0x080488be <main+189>:       add    $0x10,%esp
+   0x080488c1 <main+192>:       mov    -0x34(%ebp),%edx
+   0x080488c4 <main+195>:       mov    -0x3c(%ebp),%eax
+   0x080488c7 <main+198>:       sub    %eax,%edx
+   0x080488c9 <main+200>:       mov    %edx,%eax
+   0x080488cb <main+202>:       cmp    $0xa,%eax
+   0x080488ce <main+205>:       jle    0x80488d5 <main+212>
+   0x080488d0 <main+207>:       call   0x80486e1 <explosion>
+	*----------------------------------------------------------------*
+
+De este código, y teniendo en cuenta la llamada a gettimeofday, podemos deducir que en 
+%eax y en %edx se están almacenando los resultados obtenidos por los dos gettimeofday
+(recordemos que había otro al principio del programa), a continuación con sub se están restando
+los dos valores para obtener la diferencia, y esta tiene que ser menor o igual 10, es decir 
+todo el proceso de desactivación de la bomba tiene que realizarse en menos de 10 segundos.
+
+- Si hemos realizado todo correctamente no se habrá realizado ninguna llamada a explosión y 
+habremos llegado al final del programa donde se llama a la función desactivada, la cual imprime
+un mensaje infromándonos de que hemos desactivado la bomba con éxito. 
+

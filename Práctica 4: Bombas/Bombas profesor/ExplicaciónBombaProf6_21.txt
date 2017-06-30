@@ -1,0 +1,266 @@
+//////////////////////////////////////////////////////////////////////////////
+// Contraseña original: aJXrTYgK
+// Código original: 6465
+// Tiempo límite: 60 segundos.
+/////////////////////////////////////////////////////////////////////////////
+
+/////////////////////////////////////////////////////////////////////////////
+// Apartado 1. Cómo obtener la constraseña.
+/////////////////////////////////////////////////////////////////////////////
+
+1º.- Comenzamos colocando un breakpoint en la primera línea, y 
+ejecutando paso por paso con la orden nexti.
+
+2º.- Llegados a este punto se nos solicita la introducción de la contraseña:
+
+	*---------------------------------------------------------*
+   0x08048a19 <main+73>:        mov    %eax,0x8(%esp)
+   0x08048a1d <main+77>:        movl   $0x64,0x4(%esp)
+   0x08048a25 <main+85>:        lea    0x28(%esp),%ebx
+   0x08048a29 <main+89>:        mov    %ebx,(%esp)
+   0x08048a2c <main+92>:        call   0x8048468 <fgets@plt>
+	*---------------------------------------------------------*
+
+Veamos dónde se está almacenando con un volcado de memoria:
+
+	*----------------------------------------------*
+	Data -> Memory
+	Examine 3 hex words (4) from $esp
+	*----------------------------------------------*
+	0xffffcf20:	0xffffcf48	0x00000064	0xf7fb95a0
+	*----------------------------------------------*
+
+La almacena en 0xffffcf48.
+
+3º.- Continuamos con la ejecución y llegamos a la llamada de una función
+llamada fun1:
+
+	*-------------------------------------------------------------*
+	0x08048a31 <main+97>:        mov    %ebx,(%esp)
+   0x08048a34 <main+100>:       call   0x8048794 <fun1>
+	*-------------------------------------------------------------*
+
+Veámos cuál es el argumento que está recibiendo:
+	
+	*----------------------------------------------*
+	Data -> Memory
+	Examine 1 hex words (4) from $esp
+	*----------------------------------------------*
+	0xffffcf20:	0xffffcf48
+	*----------------------------------------------*
+
+Nos damos cuenta de que está recibiendo nuestra contraseña introducida. 
+Veámos el contenido de la función con stepi.
+
+4º.- De entre todo el contenido que presenta la función, (que no es reducido),
+la parte que más nos puede interesar para descubrir la contraseña es la 
+siguiente:
+
+	*-----------------------------------------------------------*
+	0x08048966 <fun1+466>:       mov    $0x0,%ebx
+   0x0804896b <fun1+471>:       lea    -0x25c(%ebp),%esi
+	0x08048971 <fun1+477>:       mov    -0x2cc(%ebp),%edx
+   0x08048977 <fun1+483>:       movsbl (%edx,%ebx,1),%eax
+   0x0804897b <fun1+487>:       cmp    (%esi,%ebx,4),%eax
+   0x0804897e <fun1+490>:       je     0x8048985 <fun1+497>
+   0x08048980 <fun1+492>:       call   0x80485de <boom>
+   0x08048985 <fun1+497>:       add    $0x1,%ebx
+   0x08048988 <fun1+500>:       cmp    $0x8,%ebx
+   0x0804898b <fun1+503>:       jne    0x8048971 <fun1+477>
+	*------------------------------------------------------------*
+
+5º.- Como podemos observar, se trata de un bucle que va a iterar 8
+veces, esto lo sabemos porque inicialmente el valor de %ebx (registro 
+que se utiliza como contador) presenta un valor de 0:
+
+	*---------------*	
+	mov    $0x0,%ebx
+	*---------------*
+
+Más adelante, se realiza una comparación con el valor 8, y si no es igual
+se vuelve a realizar el bucle:
+
+	*--------------------------*
+	cmp    $0x8,%ebx
+   jne    0x8048971 <fun1+477>
+	*---------------------------*
+
+Por tanto el bucle realiza un total de 8 iteraciones.
+
+Si continuamos analizando el código podemos observar que se está 
+utilizando el contador (%ebx) para indexar en dos arrays y que además 
+se están comparando sus resultados:
+
+	*------------------------*
+	movsbl (%edx,%ebx,1),%eax
+	cmp    (%esi,%ebx,4),%eax
+	*------------------------*
+
+Si comprobamos el contenido de %edx realizando un volcado de memoria,
+observamos que contiene la dirección de memoria de la contraseña 
+introducida por el usuario, por tanto podemos suponer que %esi contiene
+la contraseña de la bomba, y que este bucle lo único que está haciendo 
+es comprobar uno por uno los caracteres y si alguno no coincide
+la bomba explotará. Como sabemos la longitud de la contraseña (8)
+simplemente debemos de hacer 8 volcados de memoria (sumándole 4 cada vez
+a la dirección de %esi) para obtener cada uno de los caracteres:
+
+	*--------------------------------*
+	Data -> Memory
+	Examine 1 char bytes from $esi
+	Examine 1 char bytes from $esi+4
+	Examine 1 char bytes from $esi+8
+	Examine 1 char bytes from $esi+12
+	Examine 1 char bytes from $esi+16
+	Examine 1 char bytes from $esi+20
+	Examine 1 char bytes from $esi+24
+	Examine 1 char bytes from $esi+28
+	*--------------------------------*
+	0xffffccbc:	97 'a'
+	0xffffccc0:	74 'J'
+	0xffffccc4:	88 'X'
+	0xffffccc8:	114 'r'
+	0xffffcccc:	84 'T'
+	0xffffccd0:	89 'Y'
+	0xffffccd4:	103 'g'
+	0xffffccd8:	75 'K'
+	*--------------------------------*
+
+Por tanto la contraseña es "aJXrTYgK"
+
+6º.- Si introducimos esta contraseña vemos evidentemente que la comparación se
+evalúa en todas las iteraciones como verdadera y por tanto nunca se llama a 
+"boom", pudiendo continuar con la ejecución.
+
+//////////////////////////////////////////////////////////////////////////////////
+// Apartado 2. Cómo averiguar el código y el tiempo límite.
+/////////////////////////////////////////////////////////////////////////////////
+
+1º.- Una vez que ya sabemos la contraseña, debemos de averiguar el 
+código, para ello situamos un breakpoint después de que explote
+la bomba por primera vez (eliminamos el primero), y seguimos 
+ejecutando con nexti.
+
+2º.- Para nuesta sorpresa nos encontramos con este código:
+
+	*----------------------------------------------------------------*
+	0x08048a48 <main+120>:       call   0x8048488 <gettimeofday@plt>
+   0x08048a4d <main+125>:       mov    0x14(%esp),%eax
+   0x08048a51 <main+129>:       sub    0x1c(%esp),%eax
+   0x08048a55 <main+133>:       cmp    $0x3c,%eax
+   0x08048a58 <main+136>:       jle    0x8048a5f <main+143>
+   0x08048a5a <main+138>:       call   0x80485de <boom>
+	*----------------------------------------------------------------*
+
+De este código podemos deducir que si tardamos más de 60 segundos 
+(60 = 3C en hexadecimal) en teclear la contraseña 
+(cmp    $0x3c,%eax (%eax contiene la diferencia de tiempo con el 
+primer gettimeofday)), la bomba nos explotará, por tanto hemos 
+descubierto el límite de tiempo de la bomba.
+
+3º.- Continuamos ejecutando:
+
+	*------------------------------------------------------------------*
+	0x08048a82 <main+178>:       call   0x80484a8 <__isoc99_scanf@plt>
+   0x08048a87 <main+183>:       mov    0x24(%esp),%eax
+   0x08048a8b <main+187>:       mov    %eax,(%esp)
+   0x08048a8e <main+190>:       call   0x804862c <fun2>
+	*------------------------------------------------------------------*
+
+Podemos observar que se nos pide el código con scanf (dos parámetros,
+el formato y la variable donde almacenar lo leído). Veamos dónde lo
+está almacenando:
+
+	*--------------------------------------------*
+	Data -> Memory
+	Examine 2 hex words (4) from $esp
+	*--------------------------------------------*
+	0xffffcf20:	0x08048c54	0xffffcf44
+	*--------------------------------------------*   
+
+Lo está guardando en 0xffffcf44.
+
+Inmediatamente después se llama a una función llamada "fun2", veamos
+su contenido con stepi.
+
+4º.- El contenido de la función 2 es muy similar al de la primera,
+de entre todo el código destacamos los siguiente:
+
+	*-----------------------------------------------------*
+	0x0804872c <fun2+256>:       mov    $0x0,%ebx
+   0x08048731 <fun2+261>:       mov    $0x66666667,%edi
+   0x08048736 <fun2+266>:       lea    -0x23c(%ebp),%esi
+   0x0804873c <fun2+272>:       mov    0x8(%ebp),%eax
+   0x0804873f <fun2+275>:       imul   %edi
+   0x08048741 <fun2+277>:       sar    $0x2,%edx
+   0x08048744 <fun2+280>:       mov    0x8(%ebp),%eax
+   0x08048747 <fun2+283>:       sar    $0x1f,%eax
+   0x0804874a <fun2+286>:       sub    %eax,%edx
+   0x0804874c <fun2+288>:       mov    %edx,%eax
+   0x0804874e <fun2+290>:       lea    (%edx,%edx,4),%edx
+   0x08048751 <fun2+293>:       add    %edx,%edx
+   0x08048753 <fun2+295>:       mov    0x8(%ebp),%ecx
+   0x08048756 <fun2+298>:       sub    %edx,%ecx
+   0x08048758 <fun2+300>:       mov    %eax,0x8(%ebp)
+   0x0804875b <fun2+303>:       cmp    %ecx,(%esi,%ebx,4)
+   0x0804875e <fun2+306>:       je     0x8048765 <fun2+313>
+   0x08048760 <fun2+308>:       call   0x80485de <boom>
+   0x08048765 <fun2+313>:       add    $0x1,%ebx
+   0x08048768 <fun2+316>:       cmp    $0x4,%ebx
+   0x0804876b <fun2+319>:       jne    0x804873c <fun2+272>
+	*--------------------------------------------------------*
+
+Su mecánica es similar al anterior bucle, nuevamente %ebx vuelve a 
+contener el contador, sin embargo en este caso no se está
+iterando 8 veces, sino 4:
+	
+	*---------------*
+	cmp    $0x4,%ebx
+	*---------------*
+
+Además nuevamente se está utilzando el contador para
+indexar en un array (cuya dirección de inicio se encuentra 
+en %esi) y se está comparando con el contenido de %ecx. Por tanto
+suponemos de nuevo que %esi contiene la dirección de comienzo del
+código. Para comprobarlo realizamos 4 volcados de memoria 
+(sumándole 4 cada vez) para obtener el código:
+	
+	*----------------------------------------*
+	Data -> Memory
+	Examine 1 unsigned words (4) from $esi
+	Examine 1 unsigned words (4) from $esi+4
+	Examine 1 unsigned words (4) from $esi+8
+	Examine 1 unsigned words (4) from $esi+12
+	*----------------------------------------*
+	0xffffccdc:	5
+	0xffffcce0:	6
+	0xffffcce4:	4
+	0xffffcce8:	6
+	*----------------------------------------*
+
+Por tanto la contraseña es 5646, no obstante cuando la introducimos la bomba
+continúa explotando, ¿por qué? veámos cual es el contenido del registro %ecx
+en las iteraciones, para ello:
+
+	*------------------*	
+	Status -> registers
+	*------------------*
+
+Y nos fijamos qué contiene %ecx	
+	
+	*---------------*
+	ecx     0x4    4
+	*---------------*
+
+El código que he introducido para realizar la prueba era 1234 (para evitar 
+que hubiese números repetidos) y como podemos observar el primer número
+que está comparando no es el primero, si no el último, por tanto podríamos
+pensar que antes de compararlo, la función 2 "le da la vuelta" a nuestro número.
+
+5º.- Realizamos una prueba introduciendo el código obtenido al revés,
+es decir 6465, y observamos que la bomba no explota ahora, por tanto
+estábamos en lo cierto y la contraseña que debemos introducir es 6465.
+
+6º.- A continuación se vuelve a comprobar que no tardamos más de 60 segundos
+en introducir el código. Si todo se realiza correctamente se llamará a 
+defused que muestra el mensaje de que la bomba está desactivada.

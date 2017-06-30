@@ -1,0 +1,177 @@
+//////////////////////////////////////////////////////////////////////////////
+// Contraseña original: charmander
+// Código original: 4
+// Contraseña modificada: charmeleon
+// Código modificado: 5
+// Tiempo límite: 60 segundos.
+/////////////////////////////////////////////////////////////////////////////
+
+/////////////////////////////////////////////////////////////////////////////
+// Apartado 1. Cómo obtener la constraseña.
+/////////////////////////////////////////////////////////////////////////////
+
+1º.- Comenzamos colocando un breakpoint en la primera línea, y 
+ejecutando paso por paso con la orden nexti.
+
+2º.- Llegados a este punto se nos solicita la introducción de la contraseña:
+
+	*---------------------------------------------------------*
+	0x08048663 <main+72>:        push   %eax
+   0x08048664 <main+73>:        push   $0x64
+   0x08048666 <main+75>:        lea    -0x70(%ebp),%eax
+   0x08048669 <main+78>:        push   %eax
+   0x0804866a <main+79>:        call   0x8048420 <fgets@plt>
+	*---------------------------------------------------------*
+
+Veamos dónde se está almacenando con un volcado de memoria:
+
+	*----------------------------------------------*
+	Data -> Memory
+	Examine 3 hex words (4) from $esp
+	*----------------------------------------------*
+	0xffffcf00:	0xffffcf28	0x00000064	0xf7fb95a0
+	*----------------------------------------------*
+
+La almacena en 0xffffcf28.
+
+3ª.- Continuamos con la ejecución y llegamos a un punto del código que se
+asemeja a un bucle for, analicémos el código:
+
+	*-------------------------------------------------------*
+   0x08048672 <main+87>:        movl   $0x0,-0x84(%ebp)      // Inicializar el contador.
+   0x0804867c <main+97>:        jmp    0x80486aa <main+143>  // Go to done.
+   0x0804867e <main+99>:        mov    -0x84(%ebp),%eax      // Contador a %eax
+   0x08048684 <main+105>:       add    $0x804a034,%eax       // Sumarle el contador a lo que hay en $0x804a034
+   0x08048689 <main+110>:       movzbl (%eax),%edx
+   0x0804868c <main+113>:       lea    -0x70(%ebp),%ecx	    // Mover un vector a %ecx
+   0x0804868f <main+116>:       mov    -0x84(%ebp),%eax		 // Mover el contador a %eax
+   0x08048695 <main+122>:       add    %ecx,%eax				 // Indexar el vector
+   0x08048697 <main+124>:       movzbl (%eax),%eax
+   0x0804869a <main+127>:       cmp    %al,%dl					 // Comparar los caracteres
+   0x0804869c <main+129>:       je     0x80486a3 <main+136>  // Si no son iguales explota
+   0x0804869e <main+131>:       call   0x804859b <boom>
+   0x080486a3 <main+136>:       addl   $0x1,-0x84(%ebp)		 // Incrementamos el contador
+   0x080486aa <main+143>:       cmpl   $0x9,-0x84(%ebp)      // De aquí deducimos que el bucle 
+   0x080486b1 <main+150>:       jle    0x804867e <main+99>		 itera 10 veces (de 0 a 9)
+	*-------------------------------------------------------*
+
+Por la configuración que tiene el bucle podemos deducir que está comparando dos
+cadenas de caracteres (hasta un máximo de 10) y que en el momento en el que estas dos
+cadenas difieren en alguno de ellos, la bomba explota, por tanto la contraseña tiene
+pinta de encontrarse en 0x804a034, comprobemos su contenido con un volcado:
+
+	*-------------------------------------*
+	Data -> Memory
+	Examine 1 string bytes from 0x804a034
+	*-------------------------------------*
+	0x804a034 <password>:	"charmander\n"
+	*-------------------------------------*
+
+Parece que hemos encontrado la contraseña, además tiene 10 caracteres por tanto 
+nuestra suposición era correcta.
+
+//////////////////////////////////////////////////////////////////////////////////
+// Apartado 2. Cómo averiguar el código y el tiempo límite.
+/////////////////////////////////////////////////////////////////////////////////
+
+1º.- Una vez que ya sabemos la contraseña, debemos de averiguar el 
+código, para ello situamos un breakpoint después de que explote
+la bomba por primera vez (eliminamos el primero), y seguimos 
+ejecutando con nexti.
+
+2º.- Para nuesta sorpresa nos encontramos con este código:
+
+	*----------------------------------------------------------------*
+	0x080486bc <main+161>:       call   0x8048430 <gettimeofday@plt>
+   0x080486c1 <main+166>:       add    $0x10,%esp
+   0x080486c4 <main+169>:       mov    -0x78(%ebp),%edx
+   0x080486c7 <main+172>:       mov    -0x80(%ebp),%eax
+   0x080486ca <main+175>:       sub    %eax,%edx
+   0x080486cc <main+177>:       mov    %edx,%eax
+   0x080486ce <main+179>:       cmp    $0x3c,%eax
+   0x080486d1 <main+182>:       jle    0x80486d8 <main+189>
+   0x080486d3 <main+184>:       call   0x804859b <boom>
+	*----------------------------------------------------------------*
+
+De este código podemos deducir que si tardamos más de 60 segundos 
+(60 = 3C en hexadecimal) en teclear la contraseña 
+(cmp    $0x3c,%eax (%eax contiene la diferencia de tiempo con el 
+primer gettimeofday)), la bomba nos explotará, por tanto hemos 
+descubierto el límite de tiempo de la bomba.
+
+3º.- Continuamos ejecutando:
+
+	*------------------------------------------------------------------*
+	0x080486f7 <main+220>:       call   0x8048480 <__isoc99_scanf@plt>
+   0x080486fc <main+225>:       add    $0x10,%esp
+   0x080486ff <main+228>:       mov    0x804a040,%edx
+   0x08048705 <main+234>:       mov    -0x88(%ebp),%eax
+   0x0804870b <main+240>:       cmp    %eax,%edx
+   0x0804870d <main+242>:       je     0x8048714 <main+249>
+   0x0804870f <main+244>:       call   0x804859b <boom>
+	*------------------------------------------------------------------*
+
+Podemos observar que se nos pide el código con scanf, que se compara %eax 
+con %edx, y que si coinciden nos saltamos la explosión de la bomba, %eax 
+contiene el código obtenido por scanf y %edx el contenido de la 
+dirección 0x804a040, si realizamos un volcado de memoria obtenemos:
+
+	*--------------------------------------------*
+	Data -> Memory
+	Examine 1 unsigned words (4) from 0x804a040
+	*--------------------------------------------*
+	0x804a040 <passcode>:	4
+	*--------------------------------------------*   
+
+Por tanto el código numérico es 4.
+
+4º.- A continuación se vuelve a comprobar que no tardamos más de 60 segundos
+en introducir el código. Si todo se realiza correctamente se llamará a 
+defused que muestra el mensaje de que la bomba está desactivada.
+
+/////////////////////////////////////////////////////////////////////////////
+// Apartado 3. Modificar la constraseña y el código.
+/////////////////////////////////////////////////////////////////////////////
+
+1º.- Para modificar la contraseña utilizaremos el editor hexadecimal Ghex:
+
+	>$ ghex2 A1_25
+
+2º.- Pulsamos ctrl+F para abrir el cuadro de diálogo de búsqueda y en la 
+parte de código ASCII ecribimos charmander:
+
+	*-------------------------------------------*
+	63 68 61 72 6D 61 6E 64 65 72  |  charmander
+	*-------------------------------------------*
+
+4º.- Una vez que lo hemos encontrado, lo único que tenemos que hacer es
+modificar en la parte de ASCII el charmander por charmeleon. 
+
+5º.- A continuación debemos de modificar el código, como se trata de un 
+4, que en hexadecimal también es 4, si utilizamos el cuadro de búsqueda,
+Ghex nos mostrará una gran cantidad de cuatros, por tanto para averiguar
+que 4 se refiere al código debemos obtener su offset.
+
+6º.- Para obtener su offset, obtenemos el código máquina asociado a la
+sección .data con objdump:
+
+	>$ objdump -d -j .data A1_25
+
+Obtenemos la siguiente salida 
+
+	*----------------------------------------------------------------*
+	0804a034 <password>:
+	 804a034:	63 68 61 72 6d 61 6e 64 65 72 0a 00     charmander..
+
+	0804a040 <passcode>:
+	 804a040:	04 00 00 00 
+	*----------------------------------------------------------------*
+
+Por tanto tenemos que el offset es 04 00 00 00 y que, además, tiene que
+estar próximo al offset de la password.
+
+7º.- Localizamos la cadena con ctrl+F y una vez encontrada modificamos 
+el 4 por 5.
+
+8º.- Por último guardamos el ejecutable. Con esto ya queda modificado.
+

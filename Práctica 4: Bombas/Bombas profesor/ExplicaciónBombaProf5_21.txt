@@ -1,0 +1,187 @@
+//////////////////////////////////////////////////////////////////////////////
+// Contraseña original: WCOjTFMd
+// Código original: 6418
+// Contraseña modificada: WCOjTFMa
+// Código modificado: 6419
+// Tiempo límite: 60 segundos.
+/////////////////////////////////////////////////////////////////////////////
+
+/////////////////////////////////////////////////////////////////////////////
+// Apartado 1. Cómo obtener la constraseña.
+/////////////////////////////////////////////////////////////////////////////
+
+1º.- Comenzamos colocando un breakpoint en la primera línea, y 
+ejecutando paso por paso con la orden nexti.
+
+2º.- Llegados a este punto se nos solicita la introducción de la contraseña:
+
+	*---------------------------------------------------------*
+	0x080486a6 <main+74>:        mov    %eax,0x8(%esp)
+   0x080486aa <main+78>:        movl   $0x64,0x4(%esp)
+   0x080486b2 <main+86>:        lea    0x28(%esp),%ebx
+   0x080486b6 <main+90>:        mov    %ebx,(%esp)
+   0x080486b9 <main+93>:        call   0x804848c <fgets@plt>
+	*---------------------------------------------------------*
+
+Veamos dónde se está almacenando con un volcado de memoria:
+
+	*----------------------------------------------*
+	Data -> Memory
+	Examine 3 hex words (4) from $esp
+	*----------------------------------------------*
+	0xffffcf20:	0xffffcf48	0x00000064	0xf7fb95a0
+	*----------------------------------------------*
+
+La almacena en 0xffffcf48.
+
+Podemos comprobarlo, si lo deseamos, realizando un volcado de memoria 
+sobre el contenido de esta dirección, obviamente, mostrando su 
+contenido como un string:
+
+	*-------------------------------------*
+	Data -> Memory
+	Examine 1 string bytes from 0xffffcf48
+	*-------------------------------------*
+	0xffffcf48:	"hola\n"
+	*-------------------------------------*
+
+3ª.- Continuámos con la ejecución del programa y llegamos a un punto del código 
+en el que se invoca a la función strncmp, función de C, cuya finalidad es 
+comparar dos string recibidos como argumentos, devolviendo 0 si ambos strings 
+coinciden. 
+	
+	*-----------------------------------------------------------*
+	0x080486d4 <main+120>:       mov    %ecx,0x8(%esp)
+   0x080486d8 <main+124>:       movl   $0x804a260,0x4(%esp)
+   0x080486e0 <main+132>:       mov    %ebx,(%esp)
+   0x080486e3 <main+135>:       call   0x80484dc <strncmp@plt>
+	*-----------------------------------------------------------*
+
+Veamos que dos string está recibiendo:
+
+	*----------------------------------------------*
+	Data -> Memory
+	Examine 2 hex words (4) from $esp
+	*----------------------------------------------*
+	0xffffcf20:	0xffffcf48	0x0804a260
+	*----------------------------------------------*
+
+Como vemos, está recibiendo el string que nosotros hemos introducido con
+fgets y un string almacenado en la dirección 0x0804a260. Veamos que
+contiene esta dirección:
+
+	*-------------------------------------*
+	Data -> Memory
+	Examine 1 string bytes from 0x0804a260
+	*-------------------------------------*
+	0x804a260 <password>:	"WCOjTFMd\n"
+	*-------------------------------------*
+
+Parece que hemos encontrado la contraseña, además justo depués de llamar a 
+strncmp aparece el siguiente código:
+
+	*------------------------------------------------------*
+	0x080486e8 <main+140>:       test   %eax,%eax
+   0x080486ea <main+142>:       je     0x80486f1 <main+149>
+   0x080486ec <main+144>:       call   0x804860e <boom>
+	*-------------------------------------------------------*
+
+Por tanto podemos deducir que si el string introducido coincide con
+el contenido del campo "password" el test se evaluará como cierto y se saltará la 
+llamada a la función "boom".
+
+//////////////////////////////////////////////////////////////////////////////////
+// Apartado 2. Cómo averiguar el código y el tiempo límite.
+/////////////////////////////////////////////////////////////////////////////////
+
+1º.- Una vez que ya sabemos la contraseña, debemos de averiguar el 
+código, para ello situamos un breakpoint después de que explote
+la bomba por primera vez (eliminamos el primero), y seguimos 
+ejecutando con nexti.
+
+2º.- Para nuesta sorpresa nos encontramos con este código:
+
+	*----------------------------------------------------------------*
+	0x08048700 <main+164>:       call   0x80484ac <gettimeofday@plt>
+   0x08048705 <main+169>:       mov    0x14(%esp),%eax
+   0x08048709 <main+173>:       sub    0x1c(%esp),%eax
+   0x0804870d <main+177>:       cmp    $0x3c,%eax
+   0x08048710 <main+180>:       jle    0x8048717 <main+187>
+   0x08048712 <main+182>:       call   0x804860e <boom>
+	*----------------------------------------------------------------*
+
+De este código podemos deducir que si tardamos más de 60 segundos 
+(60 = 3C en hexadecimal) en teclear la contraseña 
+(cmp    $0x3c,%eax (%eax contiene la diferencia de tiempo con el 
+primer gettimeofday)), la bomba nos explotará, por tanto hemos 
+descubierto el límite de tiempo de la bomba.
+
+3º.- Continuamos ejecutando:
+
+	*------------------------------------------------------------------*
+	0x0804873a <main+222>:       call   0x80484cc <__isoc99_scanf@plt>
+   0x0804873f <main+227>:       mov    0x24(%esp),%eax
+   0x08048743 <main+231>:       cmp    0x804a274,%eax
+   0x08048749 <main+237>:       je     0x8048750 <main+244>
+   0x0804874b <main+239>:       call   0x804860e <boom>
+	*------------------------------------------------------------------*
+
+Podemos observar que se nos pide el código con scanf, que se compara %eax
+(que contiene el código obtenido por scanf) con el contenido de la dirección
+0x804a274 y que si coinciden nos saltamos la explosión de la bomba.
+Por tanto, la dirección de memoria con la que se compara %eax tiene todas
+las papeletas de contener el código. Realizamos un volcado de memoria
+para comprobarlo:
+
+	*--------------------------------------------*
+	Data -> Memory
+	Examine 1 unsigned words (4) from 0x804a274
+	*--------------------------------------------*
+	0x804a274 <passcode>:	6418
+	*--------------------------------------------*   
+
+Efectivamente, el código numérico es 6418.
+
+4º.- A continuación se vuelve a comprobar que no tardamos más de 60 segundos
+en introducir el código. Si todo se realiza correctamente se llamará a 
+la función "defused", que muestra el mensaje de que la bomba está desactivada.
+
+/////////////////////////////////////////////////////////////////////////////
+// Apartado 3. Modificar la constraseña y el código.
+/////////////////////////////////////////////////////////////////////////////
+
+1º.- Para modificar la contraseña utilizaremos el editor hexadecimal Ghex:
+
+	>$ ghex2 bombaProf5_21
+
+2º.- Pulsamos ctrl+F para abrir el cuadro de diálogo de búsqueda y en la 
+parte de código ASCII ecribimos WCOjTFMd:
+
+	*-----------------------------------*
+	57 43 4F 6A 54 46 4D 64  |  WCOjTFMd
+	*-----------------------------------*
+
+3º.- Una vez que lo hemos encontrado, lo único que tenemos que hacer es
+modificar en la parte de ASCII el WCOjTFMd por WCOjTFMa. 
+
+4º.- A continuación debemos de modificar el código, para ello pasamos el número
+decimal a hexadecimal:
+
+	6418 = 1912
+
+5º.- Abrimos nuevamente con ctrl+F el cuadro de búsqueda y esta vez introducimos
+en la parte de hexadecimal el número pero en little endian:
+
+	*-------------*
+	12 19  |  ...
+	*-------------*
+
+Queremos modificarlo a 6419, que en hexadecimal es 1913, por tanto escribimos
+en la parte de hexadecimal buscada:
+
+	*----*
+	13 19
+	*----*
+
+6º.- Por último guardamos el ejecutable. Con esto ya queda modificado.
+

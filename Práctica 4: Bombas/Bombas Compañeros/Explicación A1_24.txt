@@ -1,0 +1,221 @@
+//////////////////////////////////////////////////////////////////////////////
+// Contraseña original: espejismo
+// Código original: 145674
+// Contraseña modificada: espejisma
+// Código modificado: 145670
+// Tiempo límite: 5 segundos.
+/////////////////////////////////////////////////////////////////////////////
+
+/////////////////////////////////////////////////////////////////////////////
+// Apartado 1. Cómo obtener la constraseña.
+/////////////////////////////////////////////////////////////////////////////
+
+1º.- Comenzamos colocando un breakpoint en la primera línea, y 
+ejecutando paso por paso con la orden nexti.
+
+2º.- Llegados a este punto se nos solicita la introducción de la contraseña:
+
+	*---------------------------------------------------------*
+	0x08048722 <main+80>:        push   %eax
+   0x08048723 <main+81>:        push   $0x64
+   0x08048725 <main+83>:        lea    -0x70(%ebp),%eax
+   0x08048728 <main+86>:        push   %eax
+   0x08048729 <main+87>:        call   0x8048470 <fgets@plt>
+	*---------------------------------------------------------*
+
+Veamos dónde se está almacenando con un volcado de memoria:
+
+	*----------------------------------------------*
+	Data -> Memory
+	Examine 3 hex words (4) from $esp
+	*----------------------------------------------*
+	0xffffcf00:	0xffffcf28	0x00000064	0xf7fb95a0
+	*----------------------------------------------*
+
+La almacena en 0xffffcf28.
+
+3ª.- Continuamos con la ejecución y llegamos a:
+
+	*--------------------------------------------------------*
+	0x08048737 <main+101>:       push   %eax
+   0x08048738 <main+102>:       call   0x80484c0 <strlen@plt>
+	*---------------------------------------------------------*
+
+Si realizamos un volcado para comprobar que está recibiendo strlen, nos damos
+cuenta de que recibe 0xffffcf28, es decir, está calculando el tamaño de nuestra
+contraseña introducida.
+
+4º.- Continuamos ejecutando y llegamos de nuevo a otro strlen:
+
+	*----------------------------------------------------------*
+	0x08048750 <main+126>:       push   $0x804a03c
+   0x08048755 <main+131>:       call   0x80484c0 <strlen@plt>
+	*----------------------------------------------------------*
+	
+Esta vez está recibiendo como parámetro algo almacenado en 0x804a03c, para
+ver de qué se trata, volcamos la memoria:
+
+	*-------------------------------------*
+	Data -> Memory
+	Examine 1 string bytes from 0x804a03c
+	*-------------------------------------*
+	0x804a03c <password>:	"iwtinmwqs"
+	*-------------------------------------*
+
+Parece que ya hemos obtenido la contraseña, no obstante si introducimos
+directamente iwtinmwqs, la bomba continúa explotando, así que podemos deducir que
+se le está realizando alguna transformación.
+
+5º.- A continuación se llama a la siguiente función:
+
+	*-------------------------------------------------------------*
+	0x08048762 <main+144>:       pushl  -0x84(%ebp)
+   0x08048768 <main+150>:       lea    -0x70(%ebp),%eax
+   0x0804876b <main+153>:       push   %eax
+   0x0804876c <main+154>:       call   0x804868b <conversionchar>
+	*-------------------------------------------------------------*
+
+Recibe los dos argumentos siguientes:
+	
+	*---------------------------------*
+	0xffffcf00:	0xffffcf28	0x00000004	
+	*---------------------------------*
+
+Nuestra contraseña introducida y el entero 4. Vemos el contenido de
+la función con stepi.
+
+	*-----------------------------------------------------------*
+	0x08048691 <+6>:     movl   $0x0,-0xc(%ebp)
+   0x08048698 <+13>:    jmp    0x80486b6 <conversionchar+43>
+   0x0804869a <+15>:    mov    -0xc(%ebp),%edx
+   0x0804869d <+18>:    mov    0x8(%ebp),%eax
+   0x080486a0 <+21>:    add    %edx,%eax
+   0x080486a2 <+23>:    mov    -0xc(%ebp),%ecx
+   0x080486a5 <+26>:    mov    0x8(%ebp),%edx
+   0x080486a8 <+29>:    add    %ecx,%edx
+   0x080486aa <+31>:    movzbl (%edx),%edx
+   0x080486ad <+34>:    add    $0x4,%edx
+   0x080486b0 <+37>:    mov    %dl,(%eax)
+   0x080486b2 <+39>:    addl   $0x1,-0xc(%ebp)
+   0x080486b6 <+43>:    sub    $0xc,%esp
+   0x080486b9 <+46>:    pushl  0x8(%ebp)
+   0x080486bc <+49>:    call   0x80484c0 <strlen@plt>
+   0x080486c1 <+54>:    add    $0x10,%esp
+   0x080486c4 <+57>:    mov    %eax,%edx
+   0x080486c6 <+59>:    mov    -0xc(%ebp),%eax
+   0x080486c9 <+62>:    cmp    %eax,%edx
+   0x080486cb <+64>:    ja     0x804869a <conversionchar+15>
+	*------------------------------------------------------------*
+
+6º.- Si analizamos el código anterior nos damos cuenta de que se trata de un 
+bucle for que lo que hace es recorrer la contraseña que nosotros hemos
+introducido y sumarle 4 a cada uno de los caracteres, podemos comprobarlo
+volcando la memoria en 0x080486aa <+31>:    movzbl (%edx),%edx. En cada una
+de las iteraciones veremos que contiene un carácter distinto de la contraseña 
+y que a continuación le suma 4 ( add    $0x4,%edx).
+En definitiva la función conversionchar lo único que hace es aplicarle un 
+cifrado César de 4 a la contraseña introducida.
+
+7º.- Después de la función se llama a strncmp, recibiendo como parámetro
+"iwtinmwqs" y nuestra contraseña ya cifrada, por tanto si a cada letra de 
+"iwtinmwqs" le restamos cuatro obtenemos "espejismo" que es la contraseña 
+correcta.
+
+//////////////////////////////////////////////////////////////////////////////////
+// Apartado 2. Cómo averiguar el código y el tiempo límite.
+/////////////////////////////////////////////////////////////////////////////////
+
+1º.- Una vez que ya sabemos la contraseña, debemos de averiguar el 
+código, para ello situamos un breakpoint después de que explote
+la bomba por primera vez (eliminamos el primero), y seguimos 
+ejecutando con nexti.
+
+2º.- Para nuesta sorpresa nos encontramos con este código:
+
+	*----------------------------------------------------------------*
+	0x08048798 <main+198>:       call   0x8048480 <gettimeofday@plt>
+   0x0804879d <main+203>:       add    $0x10,%esp
+   0x080487a0 <main+206>:       mov    -0x78(%ebp),%edx
+   0x080487a3 <main+209>:       mov    -0x80(%ebp),%eax
+   0x080487a6 <main+212>:       sub    %eax,%edx
+   0x080487a8 <main+214>:       mov    %edx,%eax
+   0x080487aa <main+216>:       cmp    $0x5,%eax
+   0x080487ad <main+219>:       jle    0x80487b4 <main+226>
+   0x080487af <main+221>:       call   0x804860b <boom>
+	*----------------------------------------------------------------*
+
+De este código podemos deducir que si tardamos más de 5 segundos en 
+teclear la contraseña (cmp    $0x5,%eax (%eax contiene la diferencia de
+tiempo con el primer gettimeofday)), la bomba nos explotará, por tanto 
+hemos descubierto el límite de tiempo de la bomba.
+
+3º.- Continuamos ejecutando:
+
+	*------------------------------------------------------------------*
+	0x080487d3 <main+257>:       call   0x80484e0 <__isoc99_scanf@plt>
+   0x080487d8 <main+262>:       add    $0x10,%esp
+   0x080487db <main+265>:       mov    -0x88(%ebp),%edx
+   0x080487e1 <main+271>:       mov    0x804a048,%eax
+   0x080487e6 <main+276>:       cmp    %eax,%edx
+   0x080487e8 <main+278>:       je     0x80487ef <main+285>
+   0x080487ea <main+280>:       call   0x804860b <boom>
+	*------------------------------------------------------------------*
+
+Podemos observar que se nos pide el código con scanf, que se compara %eax 
+con %edx, y que si coinciden nos saltamos la explosión de la bomba, %edx 
+contiene el código obtenido por scanf y %eax el contenido de la 
+dirección 0x804a048, si realizamos un volcado de memoria obtenemos:
+
+	*--------------------------------------------*
+	Data -> Memory
+	Examine 1 unsigned words (4) from 0x804a048
+	*--------------------------------------------*
+	0x804a048 <passcode>:	145674
+	*--------------------------------------------*   
+
+Por tanto el código numérico es 145674.
+
+4º.- A continuación se vuelve a comprobar que no tardamos más de 5 segundos
+en introducir el código. Si todo se realiza correctamente se llamará a 
+defused que muestra el mensaje de que la bomba está desactivada.
+
+/////////////////////////////////////////////////////////////////////////////
+// Apartado 3. Modificar la constraseña y el código.
+/////////////////////////////////////////////////////////////////////////////
+
+1º.- Para modificar la contraseña utilizaremos el editor hexadecimal Ghex:
+
+	>$ ghex2 A1_24
+
+2º.- Pulsamos ctrl+F para abrir el cuadro de diálogo de búsqueda y en la 
+parte de código ASCII ecribimos iwtinmwqs:
+
+	*--------------------------------------*
+	69 77 74 69 6E 6D 77 71 73  |  iwtinmwqs
+	*--------------------------------------*
+
+4º.- Una vez que lo hemos encontrado, lo único que tenemos que hacer es
+modificar en la parte de ASCII el iwtinmwqs por iwtinmwqe, que sería el 
+cifrado César de 4 para espejisma.
+
+5º.- A continuación debemos de modificar el código, para ello pasamos el número
+decimal a hexadecimal:
+
+	145674 = 2390A
+
+6º.- Abrimos nuevamente con ctrl+F el cuadro de búsqueda y esta vez introducimos
+en la parte de hexadecimal el número pero en little endian:
+
+	*--------------*
+	0A 39 02  |  .9.
+	*--------------*
+
+Queremos modificarlo a 145670, que en hexadecimal es 23906, por tanto escribimos
+en la parte de hexadecimal buscada:
+
+	*-------*
+	06 39 02
+	*-------*
+
+7º.- Por último guardamos el ejecutable. Con esto ya queda modificado.
+
